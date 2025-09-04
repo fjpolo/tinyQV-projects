@@ -2,8 +2,9 @@
 
 .extern front_buffer
 
-.globl tqv_user_interrupt04
-tqv_user_interrupt04:
+.globl tqv_user_interrupt04_raw
+tqv_user_interrupt04_raw:
+    sw4 x12, -0x1f4(gp)  # Save x12-x15 to gp-0x1f4 (following on from save context in isr_entry)
     lbu a4, 0x103(tp)
     lbu a5, 0x102(tp)
     li a3, 48
@@ -30,4 +31,6 @@ tqv_user_interrupt04:
     sw4 a0, 0x120(tp)
     lw4 a0, 0x30(a4)
     sw4 a0, 0x130(tp)
-    ret
+    
+    .2byte 0x3702       # Load context, x9-x15 from gp-0x200
+    mret

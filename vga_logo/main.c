@@ -50,7 +50,7 @@ int main(void) {
   for (int i = 0; i < 16; ++i) vga_line[i] = 0x39393939;
 
   // Set interrupt cfg
-  *vga_intr = 0x2c;
+  *vga_intr = 0x3c;
 
   // Set colours
   *vga_colour1 = 0x38;
