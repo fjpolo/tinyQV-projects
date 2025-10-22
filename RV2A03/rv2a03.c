@@ -14,7 +14,8 @@
 void rv2a03_peripheral_init(void)
 {
     // Write 0 to the 32-bit Configuration Register (RV2A03_REGISTER_CONFIGURATION0)
-    rv2a03_configuration0_write(0x00000000); 
+    // b0 = CE
+    rv2a03_configuration0_write(0x00000001); 
 
     // Write 0 to the 16-bit Status Register (RV2A03_REGISTER_STATUS0)
     rv2a03_status0_write(0x0000);
