@@ -9,17 +9,22 @@
 	.globl	main
 	.type	main, @function
 main:
-	addi	sp,sp,-4
-	sw	ra,0(sp)
-	call	rv2a03_peripheral_init
-.L3:
-	call	rv2a03_peripheral_init
-	li	a5,999424
-	addi	a5,a5,576
+	li	a5,134217728
+	addi	a5,a5,544
+	li	a4,1
 .L2:
-	addi	a5,a5,-1
-	bne	a5,zero,.L2
-	j	.L3
+	sw	a4,0(a5)
+	sw	a4,0(a5)
+	sw	a4,0(a5)
+	sw	a4,0(a5)
+	sw	a4,0(a5)
+	sw	a4,0(a5)
+	sw	a4,0(a5)
+	sw	a4,0(a5)
+	sw	a4,0(a5)
+	sw	a4,0(a5)
+	sw	a4,0(a5)
+	j	.L2
 	.size	main, .-main
 	.globl	a
 	.section	.sdata.a,"aw"

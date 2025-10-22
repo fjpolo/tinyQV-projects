@@ -7,23 +7,34 @@
 
 int a = 3;
 
-static int init_rv2a03(void){
-  rv2a03_peripheral_init();
+// static int init_rv2a03(void){
+//   rv2a03_peripheral_init();
 
-  return 0;
-}
+//   return 0;
+// }
 
 int main() {
   // int8_t config0_reg ;
-  init_rv2a03();
+  // init_rv2a03();
   
   while(1){
-    init_rv2a03();
-    // config0_reg = rv2a03_peripheral_read_configuration0();
-    // printf("config0_reg: %x\r\n", config0_reg);
-    for(int j=0; j<1000000;++j);
+    *RV2A03_REGISTER_CONFIGURATION0_PTR = 0x01;
+    *RV2A03_REGISTER_CONFIGURATION0_PTR = 0x01;
+    *RV2A03_REGISTER_CONFIGURATION0_PTR = 0x01;
+    *RV2A03_REGISTER_CONFIGURATION0_PTR = 0x01;
+    *RV2A03_REGISTER_CONFIGURATION0_PTR = 0x01;
+    *RV2A03_REGISTER_CONFIGURATION0_PTR = 0x01;
+    *RV2A03_REGISTER_CONFIGURATION0_PTR = 0x01;
+    *RV2A03_REGISTER_CONFIGURATION0_PTR = 0x01;
+    *RV2A03_REGISTER_CONFIGURATION0_PTR = 0x01;
+    *RV2A03_REGISTER_CONFIGURATION0_PTR = 0x01;
+    *RV2A03_REGISTER_CONFIGURATION0_PTR = 0x01;
+    // rv2a03_peripheral_init();
+    // // config0_reg = rv2a03_peripheral_read_configuration0();
+    // // printf("config0_reg: %x\r\n", config0_reg);
+    // // for(int j=0; j<1000000;++j);
   }
 
-  rv2a03_peripheral_deinit();
+  // rv2a03_peripheral_deinit();
   return 0;
 }
