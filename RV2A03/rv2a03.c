@@ -18,7 +18,7 @@ void rv2a03_peripheral_init(void)
     rv2a03_configuration0_write(0x00000001); 
 
     // Write 0 to the 16-bit Status Register (RV2A03_REGISTER_STATUS0)
-    rv2a03_status0_write(0x0000);
+    // rv2a03_status0_write(0x0000);
     
     // Data Input/Output registers are only used for data transfer and do not require initialization.
 }
@@ -35,4 +35,12 @@ void rv2a03_peripheral_deinit(void)
 
     // Clear the Status Register
     rv2a03_status0_write(0x0000);
+}
+
+/**
+ * @brief Read Congifuration0 register
+ *
+ */
+int8_t rv2a03_peripheral_read_configuration0(void){
+    return *(volatile int8_t *)RV2A03_REGISTER_CONFIGURATION0_PTR;
 }

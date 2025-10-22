@@ -220,4 +220,10 @@ void rv2a03_peripheral_init(void);
  */
 void rv2a03_peripheral_deinit(void);
 
+/**
+ * @brief Read Congifuration0 register
+ *
+ */
+int8_t rv2a03_peripheral_read_configuration0(void);
+
 #endif // _RV2A03_H_
