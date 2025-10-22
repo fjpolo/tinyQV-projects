@@ -6,7 +6,15 @@
 
 int a = 3;
 
+static int init_rv2a03(void){
+  rv2a03_peripheral_init();
+
+  return 0;
+}
+
 int main() {
+  init_rv2a03();
+
   while(1){
     for(int i='A'; i<='Z';++i){
       uart_putc((char)i);
