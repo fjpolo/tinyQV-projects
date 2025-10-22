@@ -22,5 +22,7 @@ int main() {
       for(int j=0; j<1000000;++j);
     }
   }
+
+  rv2a03_peripheral_deinit();
   return 0;
 }
