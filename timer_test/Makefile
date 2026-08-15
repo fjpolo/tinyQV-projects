@@ -18,7 +18,7 @@ clean:
 	cd $(dir $(NAME)) && rm *.o *.elf *.bin *.hex
 
 %.o: %.c
-	$(CC) -O2 -I$(TINYQV_SDK) -march=rv32ec_zcb_zicsr -mabi=ilp32e -mno-strict-align -nostdlib -nostartfiles -ffreestanding -ffunction-sections -fdata-sections -Wall -Werror -lc -c $< -o $@
+	$(CC) -O2 -I$(TINYQV_SDK) -march=rv32ec_zcb_zicsr_zilsd -mabi=ilp32e -mno-strict-align -nostdlib -nostartfiles -ffreestanding -ffunction-sections -fdata-sections -Wall -Werror -lc -c $< -o $@
 
 %.o: %.s
 	$(AS) -march=rv32ec_zcb -mabi=ilp32e $< -o $@

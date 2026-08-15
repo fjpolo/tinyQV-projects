@@ -21,7 +21,7 @@
 
 const int WIDTH = 256;
 const int HEIGHT = 192;
-extern uint32_t* back_buffer;
+extern uint32_t* vga_gfx_back_buffer;
 
 void callback(const pp_tile_t* tile) {
   debug_tile(tile);
@@ -29,17 +29,29 @@ void callback(const pp_tile_t* tile) {
   uint8_t* alpha_data = tile->data;
   for(int y = 0; y < tile->h; y++) {
     if (tile->y + y < 0 || tile->y + y >= HEIGHT) continue;
-    uint32_t* buffer = &back_buffer[(tile->y + y) << 4];
-    for(int x = 0, xoff=tile->x; x < tile->w; x++, xoff++) {
-      if (xoff < 0 || xoff >= WIDTH) continue;
-      buffer[xoff >> 4] &= ~(3u << ((xoff & 0xF) << 1));
-      if (alpha_data[x] > 1) {
-        buffer[xoff >> 4] |= 1u << ((xoff & 0xF) << 1);
+    uint32_t* buffer = &vga_gfx_back_buffer[(tile->y + y) << 4];
+
+    for(int x = 0, xoff=tile->x; x < tile->w; ) {
+      if (xoff < 0) { x += -xoff; xoff = 0; continue; }
+      if (xoff >= WIDTH) break;
+
+      uint32_t data = 0;
+      uint32_t mask = 0;
+      int addr = xoff >> 4;
+      for (int i = (xoff & 0xF) << 1; i < 32 && x < tile->w && xoff < WIDTH; i+=2, ++x, ++xoff) {
+        if (alpha_data[x] > 1) {
+          data |= 1u << i;
+        }
+        else if (alpha_data[x] == 1) {
+          data |= 2u << i;
+        }
+        mask |= 3u << i;
       }
-      else if (alpha_data[x] == 1) {
-        buffer[xoff >> 4] |= 2u << ((xoff & 0xF) << 1);
-      }
+
+      buffer[addr] &= ~mask;
+      buffer[addr] |= data;
     }
+
     alpha_data += tile->stride;
   }
 }
