@@ -294,30 +294,26 @@ static void play_chiptune_demo(void) {
     };
 
 #ifdef SIM
-    // Phase 1: Pure Triangle bass note (isolated single voice for clean inspection)
-    uint16_t tri_timer = rv2a03_midi_to_pulse_timer(bass[0]) >> 1;
-    rv2a03_enable_channels(RV2A03_STATUS_TRI_ENABLE);
-    rv2a03_set_triangle(0x7F, true, tri_timer, 0x1E);
-    for (volatile int d = 0; d < 350; d++) asm volatile ("nop");
-    rv2a03_mute();
-    for (volatile int d = 0; d < 50; d++) asm volatile ("nop");
-
-    // Phase 2: Pure Square 1 melody note (isolated single voice)
-    rv2a03_enable_channels(RV2A03_STATUS_SQ1_ENABLE);
-    uint16_t sq_timer1 = rv2a03_midi_to_pulse_timer(melody[0]);
-    rv2a03_set_pulse1(RV2A03_DUTY_50, 0x0B, true, true, sq_timer1, 0x1E);
-    for (volatile int d = 0; d < 350; d++) asm volatile ("nop");
-    rv2a03_mute();
-    for (volatile int d = 0; d < 50; d++) asm volatile ("nop");
-
-    // Phase 3: Combined Harmony (Triangle bass + Square 1 melody together)
+    // In simulation: play complete 4-bar arpeggio sequence with sustained notes
     rv2a03_enable_channels(RV2A03_STATUS_SQ1_ENABLE | RV2A03_STATUS_TRI_ENABLE);
-    rv2a03_set_triangle(0x7F, true, tri_timer, 0x1E);
-    for (int note = 1; note < 3; note++) {
-        uint8_t m_note = melody[note];
-        uint16_t sq_timer = rv2a03_midi_to_pulse_timer(m_note);
-        rv2a03_set_pulse1(RV2A03_DUTY_50, 0x0B, true, true, sq_timer, 0x1E);
-        for (volatile int d = 0; d < 200; d++) asm volatile ("nop");
+
+    for (int bar = 0; bar < 4; bar++) {
+        // Bass note on Triangle channel
+        uint16_t tri_timer = rv2a03_midi_to_pulse_timer(bass[bar]) >> 1;
+        rv2a03_set_triangle(0x7F, true, tri_timer, 0x1E);
+
+        // 4 arpeggio notes on Square 1 channel
+        for (int note = 0; note < 4; note++) {
+            uint8_t m_note = melody[bar * 4 + note];
+            uint16_t sq_timer = rv2a03_midi_to_pulse_timer(m_note);
+
+            rv2a03_set_pulse1(RV2A03_DUTY_50, 0x0B, true, true, sq_timer, 0x1E);
+            for (volatile int d = 0; d < 2500; d++) asm volatile ("nop");
+
+            // Short staccato pause
+            rv2a03_write_reg(RV2A03_REG_SQ1_VOL, 0x30);
+            for (volatile int d = 0; d < 300; d++) asm volatile ("nop");
+        }
     }
 #else
     for (int repeat = 0; repeat < 2; repeat++) {
