@@ -59,7 +59,7 @@ static void delay_ms(uint32_t ms) {
 #define SAMPLE_THRESHOLD    10
 #endif
 
-static bool is_hardware_present(void) {
+static bool __attribute__((unused)) is_hardware_present(void) {
     rv2a03_write_reg(RV2A03_REG_CONFIG0, RV2A03_CFG_CE);
     return (rv2a03_read_reg(RV2A03_REG_CONFIG0) == RV2A03_CFG_CE);
 }
