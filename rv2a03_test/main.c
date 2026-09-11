@@ -41,8 +41,8 @@ static void delay_cycles(uint32_t count) {
 }
 
 static void delay_ms(uint32_t ms) {
-    // Approx 64,000 cycles per millisecond at 64MHz
-    delay_cycles(ms * 64000);
+    // TinyQV mtime timer increments once per microsecond (1,000 counts per ms)
+    delay_cycles(ms * 1000);
 }
 #endif
 
@@ -158,7 +158,8 @@ static bool test_tri_channel(void) {
     // 440 Hz config: linear reload 0x7F, halt true, timer 0x3E
     rv2a03_set_triangle(0x7F, true, 0x003E, 0x1E);
 
-    delay_cycles(10000);
+    // Allow ~5ms for the hardware APU frame counter tick to reload the linear counter
+    delay_ms(5);
 
     int non_zero = 0;
     int16_t peak = 0;
@@ -195,8 +196,8 @@ static bool test_noise_channel(void) {
     rv2a03_init();
     rv2a03_enable_channels(RV2A03_STATUS_NOISE_ENABLE);
 
-    // Noise config: volume 15, period index 0x0F
-    rv2a03_set_noise(0x0F, true, true, 0x0F, false, 0x1E);
+    // Noise config: volume 15, period index 0x08 (standard mid-frequency white noise)
+    rv2a03_set_noise(0x0F, true, true, 0x08, false, 0x1E);
 
     delay_cycles(10000);
 
@@ -230,7 +231,7 @@ static bool test_noise_channel(void) {
 
 // 5. Equivalent to test_all_channels_together() in test.py
 static bool test_all_channels_together(void) {
-    printf("[TEST 5] Testing All Channels Simultaneously. ");
+    printf("[TEST 5] Testing All Channels Simultaneously... ");
 
     rv2a03_init();
     rv2a03_enable_channels(RV2A03_STATUS_ALL_ENABLE);
@@ -241,7 +242,8 @@ static bool test_all_channels_together(void) {
     rv2a03_set_triangle(0x7F, true, 0x003E, 0x1E);
     rv2a03_set_noise(0x08, true, true, 0x0C, false, 0x1E);
 
-    delay_cycles(10000);
+    // Allow ~5ms for linear counter reload
+    delay_ms(5);
 
     int non_zero = 0;
     int16_t peak = 0;
