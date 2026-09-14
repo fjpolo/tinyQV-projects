@@ -544,15 +544,15 @@ static void print_synth_banner(void) {
     printf("  PIANO KEYS (Chromatic 1.5 Octaves):\n");
     printf("    Black:       [W]   [E]         [T]   [Z]   [U]         [O]   [P]\n");
     printf("                 C#    D#          F#    G#    A#          C#    D#\n");
-    printf("    White:    [A]   [S]   [D]   [F]   [G]   [H]   [J]   [K]   [L]\n");
-    printf("               C     D     E     F     G     A     B     C+    D+\n");
+    printf("    White:    [A]   [S]   [D]   [F]   [G]   [H]   [J]   [K]\n");
+    printf("               C     D     E     F     G     A     B     C+\n");
     printf("    * Tip: Both 'Z' (QWERTZ) and 'Y' (QWERTY) play G#!\n\n");
     printf("  CHANNELS:   [1] Pulse 1 (Lead)    [2] Pulse 2 (Harmony)\n");
     printf("              [3] Triangle (Bass)   [4] Noise (Percussion)\n\n");
     printf("  CONTROLS:   [Q] Cycle Duty Cycle (12.5%%, 25%%, 50%%, 75%%)\n");
-    printf("              [,] Octave Down       [.] Octave Up   (Range 2-6)\n");
-    printf("              [-] Volume Down       [+] Volume Up   (Range 0-15)\n");
-    printf("              [SPACE] Mute Note     [M] Mute All\n\n");
+    printf("              [<-] / [->] Octave Down / Up   (Range 2-6)  (or , / .)\n");
+    printf("              [v]  / [^]  Volume Down / Up   (Range 0-15) (or - / +)\n");
+    printf("              [SPACE] Mute Note              [M] Mute All\n\n");
     printf("  SOUNDBOARD: [C] Coin!    [B] Jump!       [X] Explosion!\n");
     printf("              [V] 1-Up!    [N] Snare Hit   [L] Laser / Warp!\n\n");
     printf("  JUKEBOX:    [5] Super Mario Bros. Theme\n");
@@ -595,6 +595,48 @@ static void run_synth_repl(void) {
         if (c < 0) {
             // CPU sleeps until next interrupt or UART character
             asm volatile ("nop");
+            continue;
+        }
+
+        // 0. ANSI Escape Sequences (Arrow Keys: Up/Down for Vol, Left/Right for Octave)
+        if (c == 0x1B) { // ESC
+            uint32_t esc_start = get_mtime();
+            int c2 = -1;
+            while ((get_mtime() - esc_start) < 30000) {
+                c2 = uart_rx_poll();
+                if (c2 >= 0) break;
+            }
+            if (c2 == '[' || c2 == 'O') {
+                esc_start = get_mtime();
+                int c3 = -1;
+                while ((get_mtime() - esc_start) < 30000) {
+                    c3 = uart_rx_poll();
+                    if (c3 >= 0) break;
+                }
+                if (c3 == 'A') {
+                    // UP ARROW -> Volume Up
+                    if (current_vol < 15) current_vol++;
+                    printf("\r\033[K[VOL] >> Volume UP: %d/15\n", current_vol);
+                    continue;
+                } else if (c3 == 'B') {
+                    // DOWN ARROW -> Volume Down
+                    if (current_vol > 0) current_vol--;
+                    printf("\r\033[K[VOL] >> Volume DOWN: %d/15\n", current_vol);
+                    continue;
+                } else if (c3 == 'C') {
+                    // RIGHT ARROW -> Octave Up
+                    if (current_octave < 6) current_octave++;
+                    printf("\r\033[K[OCTAVE] >> Octave UP: %d\n", current_octave);
+                    continue;
+                } else if (c3 == 'D') {
+                    // LEFT ARROW -> Octave Down
+                    if (current_octave > 2) current_octave--;
+                    printf("\r\033[K[OCTAVE] >> Octave DOWN: %d\n", current_octave);
+                    continue;
+                }
+            }
+            rv2a03_mute();
+            printf("\r\033[K[MUTE] >> Audio muted.\n");
             continue;
         }
 
