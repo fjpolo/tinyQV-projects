@@ -644,8 +644,8 @@ static void print_synth_banner(void) {
     printf("              [<-] / [->] Octave Down / Up   (Range 2-6)  (or , / .)\n");
     printf("              [v]  / [^]  Volume Down / Up   (Range 0-15) (or - / +)\n");
     printf("              [SPACE] Mute Note              [M] Mute All\n\n");
-    printf("  SOUNDBOARD: [C] Coin!    [B] Jump!       [X] Explosion!  [L] Laser!\n");
-    printf("              [V] 1-Up!    [N] Snare Hit   [9/I] Barrel Drum (Boom!)\n");
+    printf("  SOUNDBOARD: [C] Coin!    [B] Barrel Drum (Boom!)   [X] Explosion!  [L] Laser!\n");
+    printf("              [V] 1-Up!    [N] Snare Hit             [9/I] Jump!\n");
     printf("              [0/D] Cycle Barrel Distortion (0:Clean -> 1:Warm -> 2:Fuzz -> 3:Doom)\n\n");
     printf("  JUKEBOX:    [5] Super Mario Bros. Theme\n");
     printf("              [6] Berzerk APU Theme\n");
@@ -775,19 +775,19 @@ static void run_synth_repl(void) {
                 uint16_t timer = rv2a03_midi_to_pulse_timer(midi_note);
                 rv2a03_enable_channels(RV2A03_STATUS_SQ1_ENABLE);
                 rv2a03_set_pulse1(duty_constants[current_duty_idx], current_vol, true, true, timer, 0x1E);
-                freq_hz = 1789773 / (16 * (timer + 1));
+                freq_hz = 894080 / (16 * (timer + 1));
             } else if (current_channel == 1) {
                 // Pulse 2
                 uint16_t timer = rv2a03_midi_to_pulse_timer(midi_note);
                 rv2a03_enable_channels(RV2A03_STATUS_SQ2_ENABLE);
                 rv2a03_set_pulse2(duty_constants[current_duty_idx], current_vol, true, true, timer, 0x1E);
-                freq_hz = 1789773 / (16 * (timer + 1));
+                freq_hz = 894080 / (16 * (timer + 1));
             } else if (current_channel == 2) {
                 // Triangle
                 uint16_t timer = rv2a03_midi_to_pulse_timer(midi_note) >> 1;
                 rv2a03_enable_channels(RV2A03_STATUS_TRI_ENABLE);
                 rv2a03_set_triangle(0x7F, true, timer, 0x1E);
-                freq_hz = 1789773 / (32 * (timer + 1));
+                freq_hz = 894080 / (32 * (timer + 1));
             } else if (current_channel == 3) {
                 // Noise
                 uint8_t period_idx = (uint8_t)(15 - (midi_note % 16));
@@ -838,7 +838,7 @@ static void run_synth_repl(void) {
             sfx_coin();
             continue;
         } else if (c == 'b' || c == 'B') {
-            sfx_jump();
+            sfx_barrel_drum(barrel_distortion);
             continue;
         } else if (c == 'l' || c == 'L' || c == '8') {
             sfx_laser();
@@ -853,7 +853,7 @@ static void run_synth_repl(void) {
             sfx_snare();
             continue;
         } else if (c == '9' || c == 'i' || c == 'I') {
-            sfx_barrel_drum(barrel_distortion);
+            sfx_jump();
             continue;
         } else if (c == '0' || c == 'D') {
             cycle_barrel_distortion();
