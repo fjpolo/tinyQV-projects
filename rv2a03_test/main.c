@@ -8,7 +8,7 @@
  *   - Interactive Live UART Synthesizer (115200 8N1)
  *   - QWERTZ / QWERTY Chromatic Piano Keyboard (1.5 Octaves)
  *   - Retro NES Soundboard (Coin, Jump, Laser, Explosion, 1-Up, Snare)
- *   - NES Chiptune Jukebox (Super Mario Bros., Berzerk, Zelda Fanfare)
+ *   - NES Chiptune Jukebox (BlasNESmous Theme, Berzerk, Zelda Fanfare)
  *   - Real-Time APU Status & Register Inspector
  */
 
@@ -353,16 +353,82 @@ static void sfx_snare(void) {
     rv2a03_mute();
 }
 
-static void sfx_zelda_fanfare(void) {
+// --------------------------------------------------------------------------
+// Dynamic Volume Scaling, Gauge & Channel Volume Applicator
+// --------------------------------------------------------------------------
+
+static inline uint8_t get_master_vol(uint8_t *master_vol) {
+    return master_vol ? *master_vol : 12;
+}
+
+static inline uint8_t scale_vol(uint8_t base_vol, uint8_t master_vol) {
+    if (master_vol == 0 || base_vol == 0) return 0;
+    uint32_t v = ((uint32_t)base_vol * (uint32_t)master_vol + 7) / 15;
+    if (v > 15) v = 15;
+    return (uint8_t)v;
+}
+
+static void print_vol_bar(uint8_t vol) {
+    char bar[16];
+    for (int i = 0; i < 15; i++) {
+        bar[i] = (i < vol) ? '#' : '-';
+    }
+    bar[15] = '\0';
+    printf("\r\033[K[VOL] [%s] %2d/15\n", bar, vol);
+}
+
+static void apply_synth_volume(uint8_t ch, uint8_t vol, uint8_t duty_idx) {
+    const uint8_t duty_constants[4] = {
+        RV2A03_DUTY_12_5, RV2A03_DUTY_25, RV2A03_DUTY_50, RV2A03_DUTY_75
+    };
+    uint8_t d = duty_constants[duty_idx & 3];
+
+    if (vol == 0) {
+        if (ch == 0) {
+            rv2a03_write_reg(RV2A03_REG_SQ1_VOL, 0x30);
+            rv2a03_write_reg(RV2A03_REG_SQ2_VOL, 0x30);
+        } else if (ch == 1) {
+            rv2a03_write_reg(RV2A03_REG_SQ2_VOL, 0x30);
+        } else if (ch == 2) {
+            rv2a03_write_reg(RV2A03_REG_TRI_LINEAR, 0x00);
+        } else if (ch == 3) {
+            rv2a03_write_reg(RV2A03_REG_NOISE_VOL, 0x30);
+        }
+        return;
+    }
+
+    if (ch == 0) {
+        // Pulse 1 Lead: Dual pulse unison reinforcement to eliminate mixer quantization deadzone
+        rv2a03_write_reg(RV2A03_REG_SQ1_VOL, d | 0x30 | (vol & 0x0F));
+        rv2a03_write_reg(RV2A03_REG_SQ2_VOL, d | 0x30 | (vol & 0x0F));
+    } else if (ch == 1) {
+        rv2a03_write_reg(RV2A03_REG_SQ2_VOL, d | 0x30 | (vol & 0x0F));
+    } else if (ch == 2) {
+        rv2a03_write_reg(RV2A03_REG_TRI_LINEAR, 0x7F);
+    } else if (ch == 3) {
+        rv2a03_write_reg(RV2A03_REG_NOISE_VOL, 0x30 | (vol & 0x0F));
+    }
+}
+
+static void sfx_zelda_fanfare(uint8_t *master_vol) {
+    uint8_t cur_vol = get_master_vol(master_vol);
     printf("\r\033[K[JUKEBOX] >> Zelda Secret Fanfare!            \n");
+    print_vol_bar(cur_vol);
     rv2a03_enable_channels(RV2A03_STATUS_SQ1_ENABLE | RV2A03_STATUS_SQ2_ENABLE);
     const uint8_t notes[] = { 67, 66, 63, 57, 56, 64, 68, 72 };
     for (int i = 0; i < 8; i++) {
         if (uart_rx_poll() >= 0) break;
         uint16_t t1 = rv2a03_midi_to_pulse_timer(notes[i]);
         uint16_t t2 = rv2a03_midi_to_pulse_timer(notes[i] - 12);
-        rv2a03_set_pulse1(RV2A03_DUTY_50, 11, true, true, t1, 0x1E);
-        rv2a03_set_pulse2(RV2A03_DUTY_25, 7,  true, true, t2, 0x1E);
+        uint8_t v1 = scale_vol(11, cur_vol);
+        uint8_t v2 = scale_vol(7, cur_vol);
+        if (cur_vol == 0) {
+            rv2a03_write_reg(RV2A03_REG_SQ1_VOL, 0x30);
+            rv2a03_write_reg(RV2A03_REG_SQ2_VOL, 0x30);
+        } else {
+            rv2a03_set_pulse1(RV2A03_DUTY_50, v1, true, true, t1, 0x1E);
+            rv2a03_set_pulse2(RV2A03_DUTY_25, v2, true, true, t2, 0x1E);
+        }
         delay_ms(125);
     }
     rv2a03_mute();
@@ -463,8 +529,10 @@ static void cycle_barrel_distortion(void) {
            barrel_distortion, dist_names[barrel_distortion]);
 }
 
-static void play_berzerk_theme(void) {
-    printf("\r\033[K[JUKEBOX] >> Playing 'Berzerk APU Theme' (press any key to stop)... \n");
+static void play_berzerk_theme(uint8_t *master_vol) {
+    uint8_t cur_vol = get_master_vol(master_vol);
+    printf("\r\033[K[JUKEBOX] >> Playing 'Berzerk APU Theme' (press +/- for volume, any key to stop)... \n");
+    print_vol_bar(cur_vol);
     rv2a03_init();
     rv2a03_enable_channels(RV2A03_STATUS_SQ1_ENABLE | RV2A03_STATUS_TRI_ENABLE);
 
@@ -480,16 +548,53 @@ static void play_berzerk_theme(void) {
 
     for (int rep = 0; rep < 2; rep++) {
         for (int bar = 0; bar < 4; bar++) {
-            if (uart_rx_poll() >= 0) goto end_playback;
-            uint16_t tri_timer = rv2a03_midi_to_pulse_timer(bass[bar]) >> 1;
-            rv2a03_set_triangle(0x7F, true, tri_timer, 0x1E);
+            int key = uart_rx_poll();
+            if (key >= 0) {
+                if (key == '+' || key == '=') {
+                    if (cur_vol < 15) cur_vol++;
+                    if (master_vol) *master_vol = cur_vol;
+                    print_vol_bar(cur_vol);
+                } else if (key == '-' || key == '_') {
+                    if (cur_vol > 0) cur_vol--;
+                    if (master_vol) *master_vol = cur_vol;
+                    print_vol_bar(cur_vol);
+                } else {
+                    goto end_playback;
+                }
+            }
+
+            if (cur_vol == 0) {
+                rv2a03_write_reg(RV2A03_REG_TRI_LINEAR, 0x00);
+            } else {
+                uint16_t tri_timer = rv2a03_midi_to_pulse_timer(bass[bar]) >> 1;
+                rv2a03_set_triangle(0x7F, true, tri_timer, 0x1E);
+            }
 
             for (int note = 0; note < 4; note++) {
-                if (uart_rx_poll() >= 0) goto end_playback;
+                int key2 = uart_rx_poll();
+                if (key2 >= 0) {
+                    if (key2 == '+' || key2 == '=') {
+                        if (cur_vol < 15) cur_vol++;
+                        if (master_vol) *master_vol = cur_vol;
+                        print_vol_bar(cur_vol);
+                    } else if (key2 == '-' || key2 == '_') {
+                        if (cur_vol > 0) cur_vol--;
+                        if (master_vol) *master_vol = cur_vol;
+                        print_vol_bar(cur_vol);
+                    } else {
+                        goto end_playback;
+                    }
+                }
+
                 uint8_t m_note = melody[bar * 4 + note];
                 uint16_t sq_timer = rv2a03_midi_to_pulse_timer(m_note);
 
-                rv2a03_set_pulse1(RV2A03_DUTY_50, 0x0B, true, true, sq_timer, 0x1E);
+                if (cur_vol == 0) {
+                    rv2a03_write_reg(RV2A03_REG_SQ1_VOL, 0x30);
+                } else {
+                    uint8_t v = scale_vol(12, cur_vol);
+                    rv2a03_set_pulse1(RV2A03_DUTY_50, v, true, true, sq_timer, 0x1E);
+                }
                 delay_ms(120);
 
                 rv2a03_write_reg(RV2A03_REG_SQ1_VOL, 0x30);
@@ -504,77 +609,177 @@ end_playback:
 }
 
 // --------------------------------------------------------------------------
-// Jukebox: Super Mario Bros. Theme
+// Jukebox: BlasNESmous Theme (Carlos Viola / Blasphemous NES Demake by @fjpolo)
 // --------------------------------------------------------------------------
 
 #define NOTE_REST 0
 typedef struct {
-    uint8_t sq1;
-    uint8_t sq2;
-    uint8_t tri;
-    uint8_t noise;
-    uint8_t dur;
-} MarioEvent;
+    uint8_t sq1;    // MIDI note for Pulse 1 (Lead lute / guitar)
+    uint8_t sq2;    // MIDI note for Pulse 2 (Counterpoint / arpeggio)
+    uint8_t tri;    // MIDI note for Triangle (Flamenco bass)
+    uint8_t noise;  // Noise percussion pattern (0: off, 1: tap/castanet, 2: snare roll, 3: heavy strike)
+    uint8_t dur;    // Duration in ticks (50 ms per tick)
+} BlasnesmousEvent;
 
-static const MarioEvent mario_score[] = {
-    // Intro fanfare
-    {76, 64, 48, 1, 3}, {76, 64, 48, 0, 3}, {76, 64, 48, 1, 3}, {NOTE_REST, NOTE_REST, NOTE_REST, 0, 3},
-    {72, 60, 48, 1, 3}, {76, 64, 48, 0, 3}, {79, 67, 55, 3, 6}, {NOTE_REST, NOTE_REST, NOTE_REST, 0, 6},
-    {67, 55, 43, 3, 6}, {NOTE_REST, NOTE_REST, NOTE_REST, 0, 6},
+static const BlasnesmousEvent blasnesmous_score[] = {
+    // --- Phase 1: "Suena el Laúd" - Somber Flamenco Opening (D minor) ---
+    // Bar 1: Dm (D4, F4, A4) - Plucked lute motif
+    { 62, NOTE_REST, 38, 0, 4 }, // D4, D2 bass
+    { 65, 57,        38, 1, 4 }, // F4, A3 counterpoint, castanet tap
+    { 69, 62,        38, 0, 4 }, // A4, D4
+    { 65, 57,        38, 1, 4 }, // F4, A3, castanet tap
+    { 64, 57,        38, 0, 4 }, // E4, A3
+    { 62, 57,        38, 2, 6 }, // D4, D2 bass, snare roll
 
-    // Main Theme Bar 1-2
-    {72, 64, 60, 3, 4}, {NOTE_REST, NOTE_REST, NOTE_REST, 0, 2}, {67, 60, 55, 1, 4}, {NOTE_REST, NOTE_REST, NOTE_REST, 0, 2},
-    {64, 55, 52, 3, 4}, {NOTE_REST, NOTE_REST, NOTE_REST, 0, 2}, {69, 57, 57, 1, 3}, {71, 59, 59, 0, 3},
-    {70, 58, 58, 1, 3}, {69, 57, 57, 3, 4}, {NOTE_REST, NOTE_REST, NOTE_REST, 0, 2},
-    {67, 60, 60, 1, 3}, {76, 67, 64, 0, 3}, {79, 72, 67, 1, 3}, {81, 74, 69, 3, 3},
-    {77, 69, 65, 1, 3}, {79, 72, 67, 0, 3}, {NOTE_REST, NOTE_REST, NOTE_REST, 0, 3},
-    {76, 67, 64, 1, 3}, {72, 64, 60, 3, 3}, {74, 65, 62, 1, 3}, {71, 62, 59, 3, 6}
+    // Bar 2: C Major cadence step (C4, E4, G4)
+    { 60, NOTE_REST, 36, 0, 4 }, // C4, C2 bass
+    { 64, 55,        36, 1, 4 }, // E4, G3 counterpoint
+    { 67, 60,        36, 0, 4 }, // G4, C4
+    { 64, 55,        36, 1, 4 }, // E4, G3
+    { 62, 55,        36, 0, 4 }, // D4, G3
+    { 60, 55,        36, 2, 6 }, // C4, C2 bass, snare roll
+
+    // Bar 3: Bb Major cadence step (Bb3, D4, F4)
+    { 58, NOTE_REST, 34, 0, 4 }, // Bb3, Bb1 bass
+    { 62, 53,        34, 1, 4 }, // D4, F3 counterpoint
+    { 65, 58,        34, 0, 4 }, // F4, Bb3
+    { 62, 53,        34, 1, 4 }, // D4, F3
+    { 60, 53,        34, 0, 4 }, // C4, F3
+    { 58, 53,        34, 2, 6 }, // Bb3, Bb1 bass, snare roll
+
+    // Bar 4: A Major (Dominant - Phrygian resolution with C#4!)
+    { 57, NOTE_REST, 33, 0, 4 }, // A3, A1 bass
+    { 61, 57,        33, 1, 4 }, // C#4, A3 counterpoint
+    { 64, 61,        33, 0, 4 }, // E4, C#4
+    { 69, 64,        33, 3, 6 }, // A4, E4, heavy castanet hit
+    { 64, 61,        33, 1, 4 }, // E4, C#4
+    { 61, 57,        33, 0, 4 }, // C#4, A3
+    { 57, NOTE_REST, 33, 2, 8 }, // A3 chord ring out
+
+    // --- Phase 2: Dramatic Penance Theme (High Octave & Castanets) ---
+    // Bar 5: D5 lament
+    { 74, 62, 38, 1, 4 },        // D5, D4, D2 bass
+    { 73, 62, 38, 0, 2 },        // C#5 grace note
+    { 74, 65, 38, 2, 4 },        // D5, F4
+    { 77, 69, 38, 1, 6 },        // F5, A4
+    { 76, 67, 38, 0, 4 },        // E5, G4
+    { 74, 65, 38, 2, 6 },        // D5, F4
+
+    // Bar 6: Spanish Phrygian Descent (Bb4 -> A4 -> G4 -> F4 -> E4)
+    { 70, 58, 34, 1, 4 },        // Bb4, Bb3, Bb1 bass
+    { 69, 57, 34, 0, 4 },        // A4, A3
+    { 67, 55, 36, 1, 4 },        // G4, G3, C2 bass
+    { 65, 53, 38, 2, 4 },        // F4, F3, D2 bass
+    { 64, 52, 33, 1, 4 },        // E4, E3, A1 bass
+
+    // Bar 7: Dramatic Climax Cadence resolving to Dm Picardy / Flamenco A
+    { 61, 57, 33, 3, 4 },        // C#4, A3, A1 bass, heavy hit
+    { 64, 61, 33, 1, 4 },        // E4, C#4
+    { 69, 64, 33, 2, 6 },        // A4, E4
+    { 73, 69, 33, 1, 4 },        // C#5, A4
+    { 74, 70, 38, 3, 10 }        // Final D5 + Bb4 + D2 chord (Penitent One resolution!)
 };
 
-static void play_mario_theme(void) {
-    printf("\r\033[K[JUKEBOX] >> Playing 'Super Mario Bros. Theme' (press any key to stop)... \n");
+static void play_blasnesmous_theme(uint8_t *master_vol) {
+    uint8_t cur_vol = get_master_vol(master_vol);
+    printf("\r\033[K[JUKEBOX] >> Playing 'BlasNESmous Theme' (Carlos Viola / @fjpolo)...\n");
+    printf("           [Controls: +/- or Up/Down for Volume, any other key to stop]\n");
+    print_vol_bar(cur_vol);
+
     rv2a03_init();
     rv2a03_enable_channels(RV2A03_STATUS_SQ1_ENABLE | RV2A03_STATUS_SQ2_ENABLE |
                            RV2A03_STATUS_TRI_ENABLE | RV2A03_STATUS_NOISE_ENABLE);
 
-    const int num_events = sizeof(mario_score) / sizeof(mario_score[0]);
-    const uint32_t TICK_MS = 42;
+    const int num_events = sizeof(blasnesmous_score) / sizeof(blasnesmous_score[0]);
+    const uint32_t TICK_MS = 50;
 
     for (int i = 0; i < num_events; i++) {
-        if (uart_rx_poll() >= 0) break;
-        const MarioEvent *ev = &mario_score[i];
-
-        if (ev->sq1 != NOTE_REST) {
-            uint16_t sq1_timer = rv2a03_midi_to_pulse_timer(ev->sq1);
-            rv2a03_set_pulse1(RV2A03_DUTY_50, 0x0B, true, true, sq1_timer, 0x1E);
-        } else {
-            rv2a03_write_reg(RV2A03_REG_SQ1_VOL, 0x30);
+        // Check for real-time interactive volume controls during playback!
+        int key = uart_rx_poll();
+        if (key >= 0) {
+            if (key == '+' || key == '=') {
+                if (cur_vol < 15) cur_vol++;
+                if (master_vol) *master_vol = cur_vol;
+                print_vol_bar(cur_vol);
+            } else if (key == '-' || key == '_') {
+                if (cur_vol > 0) cur_vol--;
+                if (master_vol) *master_vol = cur_vol;
+                print_vol_bar(cur_vol);
+            } else if (key == 0x1B) { // ESC sequence (Arrow keys)
+                delay_ms(10);
+                int k2 = uart_rx_poll();
+                if (k2 == '[' || k2 == 'O') {
+                    int k3 = uart_rx_poll();
+                    if (k3 == 'A') { // Up
+                        if (cur_vol < 15) cur_vol++;
+                        if (master_vol) *master_vol = cur_vol;
+                        print_vol_bar(cur_vol);
+                    } else if (k3 == 'B') { // Down
+                        if (cur_vol > 0) cur_vol--;
+                        if (master_vol) *master_vol = cur_vol;
+                        print_vol_bar(cur_vol);
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break; // Any other key stops playback
+            }
         }
 
-        if (ev->sq2 != NOTE_REST) {
-            uint16_t sq2_timer = rv2a03_midi_to_pulse_timer(ev->sq2);
-            rv2a03_set_pulse2(RV2A03_DUTY_25, 0x08, true, true, sq2_timer, 0x1E);
-        } else {
-            rv2a03_write_reg(RV2A03_REG_SQ2_VOL, 0x30);
-        }
+        const BlasnesmousEvent *ev = &blasnesmous_score[i];
 
-        if (ev->tri != NOTE_REST) {
-            uint16_t tri_timer = rv2a03_midi_to_pulse_timer(ev->tri) >> 1;
-            rv2a03_set_triangle(0x7F, true, tri_timer, 0x1E);
+        if (cur_vol == 0) {
+            rv2a03_mute();
         } else {
-            rv2a03_write_reg(RV2A03_REG_TRI_LINEAR, 0x00);
-        }
+            // Pulse 1: Spanish Classical Lute / Lead (50% duty, base volume 12)
+            if (ev->sq1 != NOTE_REST) {
+                uint16_t sq1_timer = rv2a03_midi_to_pulse_timer(ev->sq1);
+                uint8_t v1 = scale_vol(12, cur_vol);
+                rv2a03_set_pulse1(RV2A03_DUTY_50, v1, true, true, sq1_timer, 0x1E);
+            } else {
+                rv2a03_write_reg(RV2A03_REG_SQ1_VOL, 0x30);
+            }
 
-        if (ev->noise == 1) {
-            rv2a03_set_noise(0x08, true, true, 0x05, false, 0x10);
-        } else if (ev->noise == 3) {
-            rv2a03_set_noise(0x0B, true, true, 0x0B, false, 0x18);
-        } else {
-            rv2a03_write_reg(RV2A03_REG_NOISE_VOL, 0x30);
+            // Pulse 2: Andalusian Counterpoint / Arpeggio (25% duty, base volume 8)
+            if (ev->sq2 != NOTE_REST) {
+                uint16_t sq2_timer = rv2a03_midi_to_pulse_timer(ev->sq2);
+                uint8_t v2 = scale_vol(8, cur_vol);
+                rv2a03_set_pulse2(RV2A03_DUTY_25, v2, true, true, sq2_timer, 0x1E);
+            } else {
+                rv2a03_write_reg(RV2A03_REG_SQ2_VOL, 0x30);
+            }
+
+            // Triangle: Deep Flamenco Bass
+            if (ev->tri != NOTE_REST) {
+                uint16_t tri_timer = rv2a03_midi_to_pulse_timer(ev->tri) >> 1;
+                rv2a03_set_triangle(0x7F, true, tri_timer, 0x1E);
+            } else {
+                rv2a03_write_reg(RV2A03_REG_TRI_LINEAR, 0x00);
+            }
+
+            // Noise: Spanish Castanet Taps & Snare Rolls
+            if (ev->noise == 1) {
+                // Soft castanet tap
+                uint8_t vn = scale_vol(9, cur_vol);
+                rv2a03_set_noise(vn, true, true, 0x03, false, 0x10);
+            } else if (ev->noise == 2) {
+                // Snare roll / march
+                uint8_t vn = scale_vol(11, cur_vol);
+                rv2a03_set_noise(vn, true, true, 0x06, false, 0x14);
+            } else if (ev->noise == 3) {
+                // Heavy accent hit
+                uint8_t vn = scale_vol(14, cur_vol);
+                rv2a03_set_noise(vn, true, true, 0x08, false, 0x1E);
+            } else {
+                rv2a03_write_reg(RV2A03_REG_NOISE_VOL, 0x30);
+            }
         }
 
         uint32_t total_time = ev->dur * TICK_MS;
-        uint32_t staccato = (total_time > 40) ? 22 : 0;
+        uint32_t staccato = (total_time > 50) ? 25 : 0;
         delay_ms(total_time - staccato);
 
         if (staccato > 0) {
@@ -647,7 +852,7 @@ static void print_synth_banner(void) {
     printf("  SOUNDBOARD: [C] Coin!    [B] Barrel Drum (Boom!)   [X] Explosion!  [L] Laser!\n");
     printf("              [V] 1-Up!    [N] Snare Hit             [9/I] Jump!\n");
     printf("              [0/D] Cycle Barrel Distortion (0:Clean -> 1:Warm -> 2:Fuzz -> 3:Doom)\n\n");
-    printf("  JUKEBOX:    [5] Super Mario Bros. Theme\n");
+    printf("  JUKEBOX:    [5] BlasNESmous Theme (Carlos Viola / @fjpolo)\n");
     printf("              [6] Berzerk APU Theme\n");
     printf("              [7] Zelda Secret Fanfare\n\n");
     printf("  SYSTEM:     [R] Dump APU Regs     [*] Run 5/5 Self-Test\n");
@@ -710,12 +915,14 @@ static void run_synth_repl(void) {
                 if (c3 == 'A') {
                     // UP ARROW -> Volume Up
                     if (current_vol < 15) current_vol++;
-                    printf("\r\033[K[VOL] >> Volume UP: %d/15\n", current_vol);
+                    apply_synth_volume(current_channel, current_vol, current_duty_idx);
+                    print_vol_bar(current_vol);
                     continue;
                 } else if (c3 == 'B') {
                     // DOWN ARROW -> Volume Down
                     if (current_vol > 0) current_vol--;
-                    printf("\r\033[K[VOL] >> Volume DOWN: %d/15\n", current_vol);
+                    apply_synth_volume(current_channel, current_vol, current_duty_idx);
+                    print_vol_bar(current_vol);
                     continue;
                 } else if (c3 == 'C') {
                     // RIGHT ARROW -> Octave Up
@@ -771,28 +978,45 @@ static void run_synth_repl(void) {
 
             uint32_t freq_hz = 0;
             if (current_channel == 0) {
-                // Pulse 1
+                // Pulse 1 Lead: Dual pulse unison reinforcement to eliminate mixer quantization deadzone
                 uint16_t timer = rv2a03_midi_to_pulse_timer(midi_note);
-                rv2a03_enable_channels(RV2A03_STATUS_SQ1_ENABLE);
-                rv2a03_set_pulse1(duty_constants[current_duty_idx], current_vol, true, true, timer, 0x1E);
+                if (current_vol == 0) {
+                    rv2a03_mute();
+                } else {
+                    rv2a03_enable_channels(RV2A03_STATUS_SQ1_ENABLE | RV2A03_STATUS_SQ2_ENABLE);
+                    rv2a03_set_pulse1(duty_constants[current_duty_idx], current_vol, true, true, timer, 0x1E);
+                    rv2a03_set_pulse2(duty_constants[current_duty_idx], current_vol, true, true, timer, 0x1E);
+                }
                 freq_hz = 894080 / (16 * (timer + 1));
             } else if (current_channel == 1) {
-                // Pulse 2
+                // Pulse 2 Harmony
                 uint16_t timer = rv2a03_midi_to_pulse_timer(midi_note);
-                rv2a03_enable_channels(RV2A03_STATUS_SQ2_ENABLE);
-                rv2a03_set_pulse2(duty_constants[current_duty_idx], current_vol, true, true, timer, 0x1E);
+                if (current_vol == 0) {
+                    rv2a03_write_reg(RV2A03_REG_SQ2_VOL, 0x30);
+                } else {
+                    rv2a03_enable_channels(RV2A03_STATUS_SQ2_ENABLE);
+                    rv2a03_set_pulse2(duty_constants[current_duty_idx], current_vol, true, true, timer, 0x1E);
+                }
                 freq_hz = 894080 / (16 * (timer + 1));
             } else if (current_channel == 2) {
                 // Triangle
                 uint16_t timer = rv2a03_midi_to_pulse_timer(midi_note) >> 1;
-                rv2a03_enable_channels(RV2A03_STATUS_TRI_ENABLE);
-                rv2a03_set_triangle(0x7F, true, timer, 0x1E);
+                if (current_vol == 0) {
+                    rv2a03_write_reg(RV2A03_REG_TRI_LINEAR, 0x00);
+                } else {
+                    rv2a03_enable_channels(RV2A03_STATUS_TRI_ENABLE);
+                    rv2a03_set_triangle(0x7F, true, timer, 0x1E);
+                }
                 freq_hz = 894080 / (32 * (timer + 1));
             } else if (current_channel == 3) {
                 // Noise
                 uint8_t period_idx = (uint8_t)(15 - (midi_note % 16));
-                rv2a03_enable_channels(RV2A03_STATUS_NOISE_ENABLE);
-                rv2a03_set_noise(current_vol, true, true, period_idx, false, 0x1E);
+                if (current_vol == 0) {
+                    rv2a03_write_reg(RV2A03_REG_NOISE_VOL, 0x30);
+                } else {
+                    rv2a03_enable_channels(RV2A03_STATUS_NOISE_ENABLE);
+                    rv2a03_set_noise(current_vol, true, true, period_idx, false, 0x1E);
+                }
                 freq_hz = (uint32_t)period_idx;
             }
 
@@ -823,13 +1047,13 @@ static void run_synth_repl(void) {
 
         // 3. Jukebox Selections (5, 6, 7)
         if (c == '5') {
-            play_mario_theme();
+            play_blasnesmous_theme(&current_vol);
             continue;
         } else if (c == '6') {
-            play_berzerk_theme();
+            play_berzerk_theme(&current_vol);
             continue;
         } else if (c == '7') {
-            sfx_zelda_fanfare();
+            sfx_zelda_fanfare(&current_vol);
             continue;
         }
 
@@ -863,6 +1087,7 @@ static void run_synth_repl(void) {
         // 5. Controls & Configuration
         if (c == 'q' || c == 'Q') {
             current_duty_idx = (current_duty_idx + 1) % 4;
+            apply_synth_volume(current_channel, current_vol, current_duty_idx);
             printf("\r\033[K[CTRL] >> Duty Cycle set to: %s\n", duty_labels[current_duty_idx]);
             continue;
         } else if (c == ',' || c == '[') {
@@ -875,11 +1100,13 @@ static void run_synth_repl(void) {
             continue;
         } else if (c == '-' || c == '_') {
             if (current_vol > 0) current_vol--;
-            printf("\r\033[K[CTRL] >> Volume set to: %d/15\n", current_vol);
+            apply_synth_volume(current_channel, current_vol, current_duty_idx);
+            print_vol_bar(current_vol);
             continue;
         } else if (c == '+' || c == '=') {
             if (current_vol < 15) current_vol++;
-            printf("\r\033[K[CTRL] >> Volume set to: %d/15\n", current_vol);
+            apply_synth_volume(current_channel, current_vol, current_duty_idx);
+            print_vol_bar(current_vol);
             continue;
         } else if (c == ' ' || c == 'm' || c == 'M') {
             rv2a03_mute();
@@ -921,7 +1148,8 @@ int main(void) {
 
 #ifdef SIM
     if (passed == 5) {
-        play_berzerk_theme();
+        uint8_t sim_vol = 12;
+        play_berzerk_theme(&sim_vol);
     }
     while (1) {
         asm volatile ("wfi");
