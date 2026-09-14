@@ -368,9 +368,100 @@ static void sfx_zelda_fanfare(void) {
     rv2a03_mute();
 }
 
-// --------------------------------------------------------------------------
-// Jukebox: Berzerk APU Theme
-// --------------------------------------------------------------------------
+static uint8_t barrel_distortion = 1; // Default to Level 1 (Warm Saturation)
+
+static void sfx_barrel_drum(uint8_t dist_level) {
+    const char *dist_names[4] = {
+        "Clean Acoustic", "Warm Saturation", "Metallic Fuzz", "Industrial Doom"
+    };
+    uint8_t mode = dist_level & 3;
+    printf("\r\033[K[DRUM] >> BARREL DRUM! [Distortion %d/3: %s]        \n",
+           mode, dist_names[mode]);
+
+    if (mode == 0) {
+        // --- LEVEL 0: Clean Acoustic Barrel ---
+        // Resonant hollow triangle pitch sweep (240 Hz -> 42 Hz) + soft wooden strike
+        rv2a03_enable_channels(RV2A03_STATUS_TRI_ENABLE | RV2A03_STATUS_NOISE_ENABLE);
+
+        // Soft mallet wood transient
+        rv2a03_set_noise(9, true, true, 0x06, false, 0x1E);
+
+        for (uint16_t t = 0x00E0; t <= 0x04C0; t += 0x0024) {
+            rv2a03_set_triangle(0x7F, true, t, 0x1E);
+            delay_ms(6);
+        }
+        rv2a03_write_reg(RV2A03_REG_NOISE_VOL, 0x30);
+        delay_ms(15);
+    }
+    else if (mode == 1) {
+        // --- LEVEL 1: Warm Saturation / Overdrive ---
+        // Deep Triangle body + Pulse 1 50% duty warm harmonic with volume decay
+        rv2a03_enable_channels(RV2A03_STATUS_TRI_ENABLE | RV2A03_STATUS_SQ1_ENABLE | RV2A03_STATUS_NOISE_ENABLE);
+
+        rv2a03_set_noise(12, true, true, 0x05, false, 0x1E);
+
+        int v = 12;
+        for (uint16_t t = 0x00D0; t <= 0x0480; t += 0x0020) {
+            rv2a03_set_triangle(0x7F, true, t, 0x1E);
+            if (v > 0) {
+                rv2a03_set_pulse1(RV2A03_DUTY_50, (uint8_t)v, true, true, t << 1, 0x1E);
+                v--;
+            } else {
+                rv2a03_write_reg(RV2A03_REG_SQ1_VOL, 0x30);
+            }
+            delay_ms(6);
+        }
+    }
+    else if (mode == 2) {
+        // --- LEVEL 2: Metallic Fuzz (Periodic 93-step Short Noise + Buzz Pulse) ---
+        // Resonant Triangle + 93-step periodic metallic noise + 25% duty fuzz buzz
+        rv2a03_enable_channels(RV2A03_STATUS_TRI_ENABLE | RV2A03_STATUS_SQ1_ENABLE | RV2A03_STATUS_NOISE_ENABLE);
+
+        // Metallic buzz (short_mode = true!)
+        rv2a03_set_noise(15, true, true, 0x05, true, 0x1E);
+
+        int v = 14;
+        for (uint16_t t = 0x00C0; t <= 0x0440; t += 0x001C) {
+            rv2a03_set_triangle(0x7F, true, t, 0x1E);
+            rv2a03_set_pulse1(RV2A03_DUTY_25, (uint8_t)(v > 0 ? v : 0), true, true, t, 0x1E);
+            if (v > 0) v--;
+            rv2a03_write_reg(RV2A03_REG_NOISE_VOL, 0x30 | (v & 0x0F));
+            delay_ms(6);
+        }
+    }
+    else {
+        // --- LEVEL 3: Industrial Doom / Bitcrush Overdrive ---
+        // Quantized coarse pitch jumps + 12.5% razor Pulse 1 + Tritone Pulse 2 + Harsh Noise
+        rv2a03_enable_channels(RV2A03_STATUS_ALL_ENABLE);
+
+        rv2a03_set_noise(15, true, true, 0x02, true, 0x1E);
+
+        int v = 15;
+        const uint16_t coarse_steps[6] = { 0x00A0, 0x0140, 0x0220, 0x0320, 0x0440, 0x0520 };
+        for (int i = 0; i < 6; i++) {
+            uint16_t t = coarse_steps[i];
+            rv2a03_set_triangle(0x7F, true, t, 0x1E);
+            rv2a03_set_pulse1(RV2A03_DUTY_12_5, (uint8_t)v, true, true, t, 0x1E);
+            // Integer tritone detuning: t * 141 / 100
+            uint16_t tritone_t = (uint16_t)((t * 141) / 100);
+            rv2a03_set_pulse2(RV2A03_DUTY_75, (uint8_t)(v > 2 ? v - 2 : 0), true, true, tritone_t, 0x1E);
+            v -= 2;
+            rv2a03_write_reg(RV2A03_REG_NOISE_VOL, 0x30 | (v & 0x0F));
+            delay_ms(24);
+        }
+    }
+
+    rv2a03_mute();
+}
+
+static void cycle_barrel_distortion(void) {
+    barrel_distortion = (barrel_distortion + 1) % 4;
+    const char *dist_names[4] = {
+        "Clean Acoustic", "Warm Saturation", "Metallic Fuzz", "Industrial Doom"
+    };
+    printf("\r\033[K[DISTORTION] >> Barrel Distortion set to: Level %d/3 (%s)\n",
+           barrel_distortion, dist_names[barrel_distortion]);
+}
 
 static void play_berzerk_theme(void) {
     printf("\r\033[K[JUKEBOX] >> Playing 'Berzerk APU Theme' (press any key to stop)... \n");
@@ -553,8 +644,9 @@ static void print_synth_banner(void) {
     printf("              [<-] / [->] Octave Down / Up   (Range 2-6)  (or , / .)\n");
     printf("              [v]  / [^]  Volume Down / Up   (Range 0-15) (or - / +)\n");
     printf("              [SPACE] Mute Note              [M] Mute All\n\n");
-    printf("  SOUNDBOARD: [C] Coin!    [B] Jump!       [X] Explosion!\n");
-    printf("              [V] 1-Up!    [N] Snare Hit   [L] Laser / Warp!\n\n");
+    printf("  SOUNDBOARD: [C] Coin!    [B] Jump!       [X] Explosion!  [L] Laser!\n");
+    printf("              [V] 1-Up!    [N] Snare Hit   [9/I] Barrel Drum (Boom!)\n");
+    printf("              [0/D] Cycle Barrel Distortion (0:Clean -> 1:Warm -> 2:Fuzz -> 3:Doom)\n\n");
     printf("  JUKEBOX:    [5] Super Mario Bros. Theme\n");
     printf("              [6] Berzerk APU Theme\n");
     printf("              [7] Zelda Secret Fanfare\n\n");
@@ -586,9 +678,11 @@ static void run_synth_repl(void) {
     const char *note_names[12] = {
         "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
     };
+    const char *dist_short[4] = { "Clean", "WarmSat", "Fuzz", "Doom" };
 
-    printf("[OCT: %d] [CH: %s] [VOL: %2d] [DUTY: %s] -> Ready! Play a note...\n",
-           current_octave, channel_labels[current_channel], current_vol, duty_labels[current_duty_idx]);
+    printf("[OCT: %d] [CH: %s] [VOL: %2d] [DUTY: %s] [DRUM DIST: %s] -> Ready!\n",
+           current_octave, channel_labels[current_channel], current_vol,
+           duty_labels[current_duty_idx], dist_short[barrel_distortion & 3]);
 
     while (1) {
         int c = uart_rx_poll();
@@ -757,6 +851,12 @@ static void run_synth_repl(void) {
             continue;
         } else if (c == 'n' || c == 'N') {
             sfx_snare();
+            continue;
+        } else if (c == '9' || c == 'i' || c == 'I') {
+            sfx_barrel_drum(barrel_distortion);
+            continue;
+        } else if (c == '0' || c == 'D') {
+            cycle_barrel_distortion();
             continue;
         }
 
