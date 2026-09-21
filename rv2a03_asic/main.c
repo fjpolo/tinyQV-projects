@@ -22,6 +22,46 @@
 
 #define printf uart_printf
 
+// --------------------------------------------------------------------------
+// Hardware PWM Audio Engine (PMOD-AUDIO v1.2 Driver)
+// --------------------------------------------------------------------------
+// Sujith Kani PWM Peripheral (Slot 20 / Simple Peri 4)
+#define PWM_SK_DUTY_REG     (*(volatile uint8_t *)0x8000440)
+// Matt Venn Dual PWM Peripheral (Slot 21 / Simple Peri 5)
+#define MATT_PWM0_REG       (*(volatile uint8_t *)0x8000450)
+#define MATT_PWM1_REG       (*(volatile uint8_t *)0x8000451)
+
+static inline uint8_t pcm_sample_to_pwm_duty(uint8_t raw) {
+    // APUMixer raw sample is unsigned 0..36
+    // Map directly to 8-bit PWM duty cycle (0..255)
+    uint16_t scaled = (uint16_t)raw * 7;
+    return (scaled > 255) ? 255 : (uint8_t)scaled;
+}
+
+static inline void pwm_audio_write(uint8_t duty) {
+    PWM_SK_DUTY_REG = duty;  // Sujith PWM (Slot 20, drives uo_out[0] - Loudspeaker J2)
+    MATT_PWM0_REG   = duty;  // Matt PWM0  (Slot 21, drives uo_out[1] - Right 3.5mm)
+    MATT_PWM1_REG   = duty;  // Matt PWM1  (Slot 21, drives uo_out[0] - Left 3.5mm)
+}
+
+static inline void rv2a03_mute_safe(void) {
+    // Zero individual channel volumes to eliminate DC leaks (Silicon Errata #1 & #2)
+    rv2a03_write_reg(RV2A03_REG_SQ1_VOL, 0x30);
+    rv2a03_write_reg(RV2A03_REG_SQ2_VOL, 0x30);
+    rv2a03_write_reg(RV2A03_REG_TRI_LINEAR, 0x00);
+    rv2a03_write_reg(RV2A03_REG_TRI_HI, 0x00);
+    rv2a03_write_reg(RV2A03_REG_NOISE_VOL, 0x30);
+    rv2a03_write_reg(RV2A03_REG_NOISE_HI, 0x00);
+    rv2a03_write_reg(RV2A03_REG_STATUS, 0x00);
+    pwm_audio_write(0);
+}
+#define rv2a03_mute rv2a03_mute_safe
+
+static inline void enable_pwm_audio(void) {
+    set_gpio_func(0, 20);  // Slot 20: Hardware PWM to uo_out[0] (PMOD Pin 1: Loudspeaker)
+    set_gpio_func(1, 21);  // Slot 21: Hardware PWM to uo_out[1] (PMOD Pin 2: Right Audio)
+}
+
 #ifdef SIM
 // For fast simulation in Icarus Verilog: direct volatile loop
 static void delay_cycles(uint32_t count) {
@@ -39,11 +79,12 @@ static void __attribute__((unused)) delay_ms(uint32_t ms) {
 }
 
 #else
-// Delay helper using mtime (runs at SoC clock frequency)
+// Real-time PCM audio streaming delay: oversamples APU sample register at >3 MHz and writes PWM duty
 static void delay_cycles(uint32_t count) {
     uint32_t start = get_mtime();
     while ((get_mtime() - start) < count) {
-        asm volatile ("nop");
+        uint8_t raw = rv2a03_read_reg(RV2A03_REG_OUTPUT_LSB);
+        pwm_audio_write(pcm_sample_to_pwm_duty(raw));
     }
 }
 
@@ -893,8 +934,8 @@ static void run_synth_repl(void) {
     while (1) {
         int c = uart_rx_poll();
         if (c < 0) {
-            // CPU sleeps until next interrupt or UART character
-            asm volatile ("nop");
+            uint8_t raw = rv2a03_read_reg(RV2A03_REG_OUTPUT_LSB);
+            pwm_audio_write(pcm_sample_to_pwm_duty(raw));
             continue;
         }
 
@@ -1140,18 +1181,23 @@ int main(void) {
     enable_all_outputs();
 
     // Map ASIC Output PMOD (uo_out) signals:
-    // uo_out[0]: TinyQV UART TX (connected to EVK USB-UART bridge, Function 2 = UART)
-    // uo_out[1]: RV2A03 apu_IRQ interrupt flag (Peripheral Slot 14)
-    // uo_out[2]: RV2A03 apu_o_ce audio clock enable strobe (Peripheral Slot 14)
-    // uo_out[3..7]: RV2A03 passthrough / GPIO
-    set_gpio_func(0, 2);         // Peripheral 2 (UART TX)
-    set_gpio_func(1, 14);        // Peripheral 14 (RV2A03 apu_IRQ)
-    set_gpio_func(2, 14);        // Peripheral 14 (RV2A03 apu_o_ce)
-    set_gpio_func(3, 14);
-    set_gpio_func(4, 14);
+    // uo_out[0]: PMOD Pin 1 -> Left Audio / Loudspeaker J2 (Slot 20: Sujith PWM)
+    // uo_out[1]: PMOD Pin 2 -> Right Audio / Headphone 3.5mm (Slot 21: Matt PWM)
+    // uo_out[2]: RV2A03 apu_o_ce audio clock enable strobe (Slot 14)
+    // uo_out[3]: RV2A03 apu_IRQ interrupt flag (Slot 14)
+    // uo_out[4]: TinyQV UART TX mirror (Slot 2: UART - dedicated console)
+    // uo_out[6]: TinyQV UART TX mirror (Slot 2: UART)
+    set_gpio_func(0, 2);         // Start with UART TX on uo_out[0] for boot banner
+    set_gpio_func(1, 21);        // Slot 21: Hardware PWM to PMOD Pin 2 (Right Audio)
+    set_gpio_func(2, 14);        // Slot 14: RV2A03 apu_o_ce
+    set_gpio_func(3, 14);        // Slot 14: RV2A03 apu_IRQ
+    set_gpio_func(4, 2);         // Slot 2:  UART TX mirror on uo_out[4] (dedicated console)
     set_gpio_func(5, 14);
-    set_gpio_func(6, 14);
+    set_gpio_func(6, 2);         // Slot 2:  UART TX mirror on uo_out[6]
     set_gpio_func(7, 14);
+
+    // Initialize PWM registers to 0 (silence)
+    pwm_audio_write(0);
 
 #ifndef ASIC_CLOCK_MHZ
 #define ASIC_CLOCK_MHZ 64
@@ -1173,8 +1219,13 @@ int main(void) {
     printf("  TinyQV RV2A03 NES APU Sound Peripheral Testsuite  \n");
     printf("  Target: Sky25a Berzerk ASIC Silicon (EVK Board)   \n");
     printf("  Clock:  %d MHz | Peripheral Slot: 14 (RV2A03)      \n", ASIC_CLOCK_MHZ);
+    printf("  Audio:  PMOD-AUDIO v1.2 (uo_out[0] Left, [1] Right)\n");
+    printf("  UART:   uo_out[4] / uo_out[6] @ 115200 8N1         \n");
     printf("=====================================================\n\n");
 #endif
+
+    // Switch uo_out[0] to Hardware PWM (Slot 20: Sujith PWM) for audio output
+    enable_pwm_audio();
 
     int passed = run_full_testsuite();
 
