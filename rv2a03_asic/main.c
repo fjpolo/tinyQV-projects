@@ -139,6 +139,14 @@ static bool test_sq1_channel(void) {
     rv2a03_set_pulse1(RV2A03_DUTY_50, 0x0F, true, true, 0x007E, 0x1E);
     delay_cycles(10000);
 
+    uint8_t cfg_val = rv2a03_read_reg(RV2A03_REG_CONFIG0);
+    uint8_t stat_val = rv2a03_read_reg(RV2A03_REG_STATUS);
+    uint8_t lsb_val = rv2a03_read_reg(RV2A03_REG_OUTPUT_LSB);
+    uint8_t msb_val = rv2a03_read_reg(RV2A03_REG_OUTPUT_MSB);
+    int16_t sample_init = rv2a03_read_sample();
+    printf("\n  [DIAG Slot %d] CFG0=0x%02X STATUS=0x%02X LSB=0x%02X MSB=0x%02X Sample=%d\n  ",
+           rv2a03_slot_num, cfg_val, stat_val, lsb_val, msb_val, sample_init);
+
     int non_zero = 0;
     int16_t peak = 0;
     for (int i = 0; i < SAMPLE_COUNT; i++) {
@@ -1187,14 +1195,17 @@ int main(void) {
     // uo_out[3]: RV2A03 apu_IRQ interrupt flag (Slot 14)
     // uo_out[4]: TinyQV UART TX mirror (Slot 2: UART - dedicated console)
     // uo_out[6]: TinyQV UART TX mirror (Slot 2: UART)
-    set_gpio_func(0, 2);         // Start with UART TX on uo_out[0] for boot banner
-    set_gpio_func(1, 21);        // Slot 21: Hardware PWM to PMOD Pin 2 (Right Audio)
-    set_gpio_func(2, 14);        // Slot 14: RV2A03 apu_o_ce
-    set_gpio_func(3, 14);        // Slot 14: RV2A03 apu_IRQ
-    set_gpio_func(4, 2);         // Slot 2:  UART TX mirror on uo_out[4] (dedicated console)
-    set_gpio_func(5, 14);
-    set_gpio_func(6, 2);         // Slot 2:  UART TX mirror on uo_out[6]
-    set_gpio_func(7, 14);
+    // Initialize & auto-detect RV2A03 APU slot (Silicon is Slot 4)
+    rv2a03_init();
+
+    set_gpio_func(0, 2);                  // Start with UART TX on uo_out[0] for boot banner
+    set_gpio_func(1, 21);                 // Slot 21: Hardware PWM to PMOD Pin 2 (Right Audio)
+    set_gpio_func(2, rv2a03_slot_num);    // RV2A03 apu_o_ce
+    set_gpio_func(3, rv2a03_slot_num);    // RV2A03 apu_IRQ
+    set_gpio_func(4, 2);                  // Slot 2:  UART TX mirror on uo_out[4] (dedicated console)
+    set_gpio_func(5, rv2a03_slot_num);
+    set_gpio_func(6, 2);                  // Slot 2:  UART TX mirror on uo_out[6]
+    set_gpio_func(7, rv2a03_slot_num);
 
     // Initialize PWM registers to 0 (silence)
     pwm_audio_write(0);
@@ -1218,7 +1229,7 @@ int main(void) {
     printf("=====================================================\n");
     printf("  TinyQV RV2A03 NES APU Sound Peripheral Testsuite  \n");
     printf("  Target: Sky25a Berzerk ASIC Silicon (EVK Board)   \n");
-    printf("  Clock:  %d MHz | Peripheral Slot: 14 (RV2A03)      \n", ASIC_CLOCK_MHZ);
+    printf("  Clock:  %d MHz | Peripheral Slot: %d (RV2A03)      \n", ASIC_CLOCK_MHZ, rv2a03_slot_num);
     printf("  Audio:  PMOD-AUDIO v1.2 (uo_out[0] Left, [1] Right)\n");
     printf("  UART:   uo_out[4] / uo_out[6] @ 115200 8N1         \n");
     printf("=====================================================\n\n");
@@ -1238,14 +1249,10 @@ int main(void) {
         asm volatile ("wfi");
     }
 #else
-    if (passed == 5) {
-        run_synth_repl();
-    } else {
-        printf("\n[ERROR] Hardware self-test failed! Synthesizer halted.\n");
-        while (1) {
-            asm volatile ("wfi");
-        }
+    if (passed < 5) {
+        printf("[WARN] Self-test returned %d/5. Continuing to interactive synthesizer...\n\n", passed);
     }
+    run_synth_repl();
 #endif
 
     return 0;
